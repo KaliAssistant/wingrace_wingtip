@@ -1,11 +1,21 @@
 # PROJ ==========
 
+blflash
+
+*.obj
+*.bin
+*.hex
+*.o
+*.a
+*.elf
 
 .release
 .unused
 .hidden
 .kaliworkingspace
-.workdir# Apple =============
+.workdir
+
+# Apple =============
 .DS_Store
 .AppleDouble
 .LSOverride
