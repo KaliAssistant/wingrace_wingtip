@@ -10,6 +10,7 @@ that finds the serial port by itself and a Makefile for Linux and macOS.
 | File | What it is |
 |---|---|
 | `wingtip_ctrl.asm` | Application firmware (lights + RX-only protocol) |
+| `wingtip_ctrl_servo.asm` | Same, plus servo (RC PWM) mode after a 5 s serial window |
 | `wingtip_boot.asm` / `wingtip_boot.hex` | Bootloader (words `0x0E00..0x0FFF`) |
 | `blflash.c` | Host flasher (Linux / macOS, plain C, no dependencies) |
 | `Makefile` | Builds everything, flashes, installs the loader via ISP |
@@ -77,6 +78,47 @@ Timing notes:
   was needed. If yours is close to the edge, set
   `OSCCAL_ADJ` in **both** `.asm` files (a signed trim, stay away from the
   `0x7F`/`0x80` boundary).
+
+## Servo-mode variant (`wingtip_ctrl_servo.asm`)
+
+Same lights, same serial commands, same bootloader hook, plus an RC/servo PWM
+input on the same pin, for a flight controller that only has a PWM or servo
+output.
+
+- **First 5 s after power-up:** the pin is a 9600 8N1 serial input exactly as
+  above. The first recognised command, including the bootloader entry
+  `F0 B0 07`, latches serial mode until the next power cycle.
+- **No command within 5 s:** servo mode. The app measures the positive pulse
+  (1000..2000 us, 50..400 Hz) on PB0 and shows a scene for the zone it falls in:
+
+| Pulse | Zone | Scene |
+|---|---|---|
+| below 1083 us | 0 | all off |
+| 1083..1250 | 1 | NAV |
+| 1250..1417 | 2 | NAV + BAKL |
+| 1417..1583 | 3 | NAV + BAKL + both strobes flashing |
+| 1583..1750 | 4 | NAV + both strobes flashing |
+| 1750..1917 | 5 | both strobes steady on |
+| 1917 us and above | 6 | everything steady on |
+
+- The zone centres sit on 1000 / 1167 / 1333 / 1500 / 1667 / 1833 / 2000 us, so
+  a 3-position switch (1000 / 1500 / 2000) lands in the middle of a zone.
+- A new zone must be seen for 3 frames in a row before it is applied. Pulses
+  outside 800..2200 us are ignored.
+- **Failsafe:** with no valid pulse for 500 ms, or at servo-mode entry before
+  the first pulse, it shows NAV + BAKL + flashing strobes (so a lost link is
+  visible, not dark). Constants: `FAILSAFE_SCENE`, `FS_MS`.
+- **Flashing strobes** (zones 3 and 4, and failsafe): one 50 ms flash every
+  1000 ms, both strobes together (`AUTO_HIGH_MS`, `AUTO_PERIOD_MS`).
+- **Changing the mapping:** edit `scene_table` (one byte per zone; bit 0 NAV,
+  1 BAKL, 2 front strobe steady, 3 back strobe steady, 4 front flashing,
+  5 back flashing) and the zone boundaries `N_B1..N_B6`.
+- **Reflashing:** power-cycle and run `make flash APP=wingtip_ctrl_servo ENTER=1`
+  within the 5 s window (the loader's own 0.5 s cold window also accepts a plain
+  `make flash`). Once the app is in servo mode the only way back in is a power
+  cycle.
+- Pulse measurement accuracy is about ±10 us (the 1 ms timer interrupts run
+  during the measurement), well inside the 167 us zones.
 
 ## Flash layout
 
@@ -187,6 +229,7 @@ and unlink the loader. Use `blflash`.
 make flash                   # then power-cycle the board
 make flash ENTER=1           # app already running: it is sent into the loader
 make flash ECHO=1            # half-duplex adapter that echoes our own bytes
+make flash APP=wingtip_ctrl_servo        # the serial + servo-mode application
 make flash PORT=/dev/cu.usbserial-1410   # pin a port if auto-detect picks wrong
 ```
 
@@ -234,9 +277,12 @@ pty bridging the PB0 pin to a "serial port": full flash and read-back with the
 real `blflash`, warm entry, echo mode, bad CRC, unknown command, out-of-range
 pages, page-0 vector protection, resync after a partial frame, auto port
 detection with a silent decoy port, and baud error tolerance of about ±4%.
+The servo variant was simulated with a scripted PWM input: every zone, the
+failsafe, a PWM signal or a line stuck low during the serial window, and a
+serial command latching serial mode.
 
 Tested on real hardware: an ATtiny85-20SUR of unknown origin (the laser
 marking suggests a clone, this part is hard to get from the usual distributors).
 The app and the loader work at 4.9..5.1 V without any `OSCCAL_ADJ`.
 
-Not tested: power loss during a flash write, and macOS.
+Not tested on hardware: power loss during a flash write.

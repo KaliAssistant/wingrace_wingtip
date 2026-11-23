@@ -4,6 +4,7 @@
 #   make flash           flash the app through the loader (serial port auto-detected)
 #   make flash ENTER=1   ... from a running app (sends the enter-loader sequence)
 #   make flash PORT=/dev/cu.usbserial-1410      pin a port (only if auto-detect picks wrong)
+#   make flash APP=wingtip_ctrl_servo           flash the serial + servo-mode app instead
 #   make flash ECHO=1    half-duplex adapter that echoes our own bytes
 #   make ports           list the serial ports blflash would probe
 #   make isp             one-time: flash the loader + fuses with avrdude (ISP)
@@ -22,6 +23,10 @@ AVRA    ?= avra
 #   Debian/Ubuntu: /usr/share/avra        Homebrew: $(brew --prefix)/share/avra
 AVRA_INC ?=
 
+# which application to flash / verify: wingtip_ctrl (serial only) or
+# wingtip_ctrl_servo (serial for 5 s after power-up, then servo PWM mode)
+APP ?= wingtip_ctrl
+
 PROGRAMMER ?= ch341a
 AVRDUDE    ?= avrdude
 
@@ -30,7 +35,7 @@ BLFLAGS = $(if $(PORT),-p $(PORT)) $(if $(ECHO),-e) $(if $(ENTER),-E) $(EXTRA)
 
 .PHONY: all flash verify read info run ports isp clean
 
-all: blflash wingtip_boot.hex wingtip_ctrl.hex
+all: blflash wingtip_boot.hex wingtip_ctrl.hex wingtip_ctrl_servo.hex
 
 blflash: blflash.c
 	$(CC) $(CFLAGS) -o $@ $<
@@ -38,11 +43,11 @@ blflash: blflash.c
 wingtip_%.hex: wingtip_%.asm
 	$(AVRA) $(if $(AVRA_INC),-I $(AVRA_INC)) $<
 
-flash: blflash wingtip_ctrl.hex
-	./blflash $(BLFLAGS) flash wingtip_ctrl.hex
+flash: blflash $(APP).hex
+	./blflash $(BLFLAGS) flash $(APP).hex
 
-verify: blflash wingtip_ctrl.hex
-	./blflash $(BLFLAGS) verify wingtip_ctrl.hex
+verify: blflash $(APP).hex
+	./blflash $(BLFLAGS) verify $(APP).hex
 
 read: blflash
 	./blflash $(BLFLAGS) read dump.bin
